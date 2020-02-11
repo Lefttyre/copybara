@@ -31,6 +31,7 @@ import com.google.common.collect.Lists;
 import com.google.common.flogger.FluentLogger;
 import com.google.copybara.authoring.Author;
 import com.google.copybara.doc.annotations.DocSignaturePrefix;
+import com.google.copybara.exception.RepoException;
 import com.google.copybara.exception.ValidationException;
 import com.google.copybara.treestate.FileSystemTreeState;
 import com.google.copybara.treestate.TreeState;
@@ -97,14 +98,19 @@ public final class TransformWork implements SkylarkContext<TransformWork>, Starl
   private final TreeState treeState;
   private final boolean insideExplicitTransform;
   private final boolean ignoreNoop;
-  @Nullable
-  private final Revision lastRev;
+  @Nullable private final Revision lastRev;
   @Nullable private final Revision currentRev;
   private TransformWork skylarkTransformWork;
   private final Dict<?, ?> skylarkTransformParams;
+  private final LazyResourceLoader<Endpoint> originApi;
+  private final LazyResourceLoader<Endpoint>  destinationApi;
+  private final ResourceSupplier<DestinationReader> destinationReader;
+
 
   public TransformWork(Path checkoutDir, Metadata metadata, Changes changes, Console console,
-      MigrationInfo migrationInfo, Revision resolvedReference, boolean ignoreNoop) {
+      MigrationInfo migrationInfo, Revision resolvedReference, boolean ignoreNoop,
+      LazyResourceLoader<Endpoint> originApi, LazyResourceLoader<Endpoint> destinationApi,
+      ResourceSupplier<DestinationReader> destinationReader) {
     this(
         checkoutDir,
         metadata,
@@ -117,7 +123,10 @@ public final class TransformWork implements SkylarkContext<TransformWork>, Starl
         /*lastRev=*/ null,
         /*currentRev=*/ null,
         Dict.empty(),
-        ignoreNoop);
+        ignoreNoop,
+        originApi,
+        destinationApi,
+        destinationReader);
   }
 
   private TransformWork(
@@ -132,7 +141,10 @@ public final class TransformWork implements SkylarkContext<TransformWork>, Starl
       @Nullable Revision lastRev,
       @Nullable Revision currentRev,
       Dict<?, ?> skylarkTransformParams,
-      boolean ignoreNoop) {
+      boolean ignoreNoop,
+      LazyResourceLoader<Endpoint> originApi,
+      LazyResourceLoader<Endpoint> destinationApi,
+      ResourceSupplier<DestinationReader> destinationReader) {
     this.checkoutDir = Preconditions.checkNotNull(checkoutDir);
     this.metadata = Preconditions.checkNotNull(metadata);
     this.changes = changes;
@@ -146,6 +158,9 @@ public final class TransformWork implements SkylarkContext<TransformWork>, Starl
     this.skylarkTransformWork = this;
     this.skylarkTransformParams = skylarkTransformParams;
     this.ignoreNoop = ignoreNoop;
+    this.originApi = Preconditions.checkNotNull(originApi);
+    this.destinationApi = Preconditions.checkNotNull(destinationApi);
+    this.destinationReader = Preconditions.checkNotNull(destinationReader);
   }
 
   /**
@@ -440,6 +455,36 @@ public final class TransformWork implements SkylarkContext<TransformWork>, Starl
     return findLabelValues(label, /*all=*/true);
   }
 
+  @SkylarkCallable(
+      name = "origin_api",
+      doc =
+          "Returns an api handle for the origin repository. Methods available depend on the origin "
+              + "type. Use with extreme caution, as external calls can make workflow "
+              + "non-deterministic and possibly irreversible. Can have side effects in dry-run"
+              + "mode.")
+  public Endpoint getOriginApi() throws ValidationException, RepoException {
+    return originApi.load(console);
+  }
+
+  @SkylarkCallable(
+      name = "destination_api",
+      doc =
+          "Returns an api handle for the destination repository. Methods available depend on the "
+              + "destination type. Use with extreme caution, as external calls can make workflow "
+              + "non-deterministic and possibly irreversible. Can have side effects in dry-run"
+              + "mode.")
+  public Endpoint getDestinationApi() throws ValidationException, RepoException {
+    return destinationApi.load(console);
+  }
+
+  @SkylarkCallable(
+      name = "destination_reader",
+      doc =
+          "Returns a handle to read files from the destination, if supported by the destination.")
+  public DestinationReader getDestinationReader() throws ValidationException, RepoException {
+    return destinationReader.get();
+  }
+
   private Sequence<String> findLabelValues(String label, boolean all) {
     Map<String, ImmutableList<String>> coreLabels = getCoreLabels();
     if (coreLabels.containsKey(label)) {
@@ -535,7 +580,8 @@ public final class TransformWork implements SkylarkContext<TransformWork>, Starl
   public TransformWork withConsole(Console newConsole) {
     return new TransformWork(checkoutDir, metadata, changes, Preconditions.checkNotNull(newConsole),
         migrationInfo, resolvedReference, treeState, insideExplicitTransform, lastRev,
-        currentRev, skylarkTransformParams, ignoreNoop);
+        currentRev, skylarkTransformParams, ignoreNoop, originApi, destinationApi,
+        destinationReader);
   }
 
   /**
@@ -544,53 +590,54 @@ public final class TransformWork implements SkylarkContext<TransformWork>, Starl
    */
   public TransformWork withUpdatedTreeState() {
     return new TransformWork(checkoutDir, metadata, changes, console,
-                             migrationInfo, resolvedReference, treeState.newTreeState(),
-                             insideExplicitTransform, lastRev, currentRev, skylarkTransformParams, ignoreNoop);
+        migrationInfo, resolvedReference, treeState.newTreeState(), insideExplicitTransform,
+        lastRev, currentRev, skylarkTransformParams, ignoreNoop, originApi, destinationApi,
+        destinationReader);
   }
 
   @Override
   public TransformWork withParams(Dict<?, ?> params) {
     Preconditions.checkNotNull(params);
     return new TransformWork(checkoutDir, metadata, changes, console, migrationInfo,
-                             resolvedReference, treeState, insideExplicitTransform, lastRev,
-                             currentRev, params, ignoreNoop);
+        resolvedReference, treeState, insideExplicitTransform, lastRev, currentRev, params,
+        ignoreNoop, originApi, destinationApi, destinationReader);
   }
 
   @VisibleForTesting
   public TransformWork withChanges(Changes changes) {
     Preconditions.checkNotNull(changes);
     return new TransformWork(checkoutDir, metadata, changes, console, migrationInfo,
-                             resolvedReference, treeState, insideExplicitTransform, lastRev,
-                             currentRev, skylarkTransformParams, ignoreNoop);
+       resolvedReference, treeState, insideExplicitTransform, lastRev, currentRev,
+        skylarkTransformParams, ignoreNoop, originApi, destinationApi, destinationReader);
   }
 
   @VisibleForTesting
   public TransformWork withLastRev(@Nullable Revision previousRef) {
     return new TransformWork(checkoutDir, metadata, changes, console, migrationInfo,
-                             resolvedReference, treeState, insideExplicitTransform, previousRef,
-                             currentRev, skylarkTransformParams, ignoreNoop);
+        resolvedReference, treeState, insideExplicitTransform, previousRef, currentRev,
+        skylarkTransformParams, ignoreNoop, originApi, destinationApi, destinationReader);
   }
 
   @VisibleForTesting
   public TransformWork withResolvedReference(Revision resolvedReference) {
     Preconditions.checkNotNull(resolvedReference);
     return new TransformWork(checkoutDir, metadata, changes, console, migrationInfo,
-                             resolvedReference, treeState, insideExplicitTransform, lastRev,
-                             currentRev, skylarkTransformParams, ignoreNoop);
+        resolvedReference, treeState, insideExplicitTransform, lastRev, currentRev,
+        skylarkTransformParams, ignoreNoop, originApi, destinationApi, destinationReader);
   }
 
   public TransformWork insideExplicitTransform(boolean ignoreNoop) {
     Preconditions.checkNotNull(resolvedReference);
     return new TransformWork(checkoutDir, metadata, changes, console, migrationInfo,
-                             resolvedReference, treeState, /*insideExplicitTransform=*/true,
-                             lastRev, currentRev, skylarkTransformParams, ignoreNoop);
+        resolvedReference, treeState, /*insideExplicitTransform=*/true, lastRev, currentRev,
+        skylarkTransformParams, ignoreNoop, originApi, destinationApi, destinationReader);
   }
 
   public <O extends Revision> TransformWork withCurrentRev(Revision currentRev) {
     Preconditions.checkNotNull(currentRev);
     return new TransformWork(checkoutDir, metadata, changes, console, migrationInfo,
-                             resolvedReference, treeState, insideExplicitTransform,
-                             lastRev, currentRev, skylarkTransformParams, ignoreNoop);
+        resolvedReference, treeState, insideExplicitTransform, lastRev, currentRev,
+        skylarkTransformParams, ignoreNoop, originApi, destinationApi, destinationReader);
   }
 
   /**
@@ -647,5 +694,9 @@ public final class TransformWork implements SkylarkContext<TransformWork>, Starl
         result == null || result.equals(Starlark.NONE),
         "Transform work cannot return any result but returned: %s",
         result);
+  }
+
+  public interface ResourceSupplier<T> {
+    T get() throws ValidationException, RepoException;
   }
 }

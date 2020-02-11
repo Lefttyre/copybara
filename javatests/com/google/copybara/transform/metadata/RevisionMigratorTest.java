@@ -17,6 +17,7 @@
 package com.google.copybara.transform.metadata;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertThrows;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
@@ -25,28 +26,27 @@ import com.google.common.jimfs.Jimfs;
 import com.google.copybara.Change;
 import com.google.copybara.ChangeVisitable;
 import com.google.copybara.Changes;
+import com.google.copybara.DestinationReader;
 import com.google.copybara.Metadata;
 import com.google.copybara.MigrationInfo;
 import com.google.copybara.TransformWork;
 import com.google.copybara.authoring.Author;
 import com.google.copybara.exception.RepoException;
 import com.google.copybara.exception.ValidationException;
+import com.google.copybara.testing.DummyEndpoint;
 import com.google.copybara.testing.DummyOrigin;
 import com.google.copybara.testing.DummyRevision;
 import com.google.copybara.testing.OptionsBuilder;
 import com.google.copybara.testing.SkylarkTestExecutor;
 import com.google.copybara.util.console.testing.TestingConsole;
 import com.google.devtools.build.lib.events.Location;
-import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.re2j.Pattern;
 import java.nio.file.FileSystem;
 import java.nio.file.Path;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
@@ -61,21 +61,13 @@ public class RevisionMigratorTest {
   private Path checkoutDir;
   private Location location;
 
-  @Rule
-  public final ExpectedException thrown = ExpectedException.none();
-
   @Before
   public void setUp() throws Exception {
     FileSystem fs = Jimfs.newFileSystem();
     checkoutDir = fs.getPath("/test-checkoutDir");
     origin = new DummyOrigin();
     destinationReader = new MockReader();
-    location = new Location(1, 2) {
-      @Override
-      public PathFragment getPath() {
-        return null;
-      }
-    };
+    location = Location.fromFileLineColumn("file", 1, 2);
     referenceMigrator = ReferenceMigrator.create(
         "http://internalReviews.com/${reference}",
         "http://externalreviews.com/view?${reference}",
@@ -94,7 +86,8 @@ public class RevisionMigratorTest {
     return new TransformWork(checkoutDir, new Metadata(msg, new Author("foo", "foo@foo.com"),
         ImmutableSetMultimap.of()),
         Changes.EMPTY, console, new MigrationInfo(DummyOrigin.LABEL_NAME, destinationReader),
-        new DummyRevision("1234567890"), false);
+        new DummyRevision("1234567890"), false, c -> origin.getEndpoint(),
+        c -> new DummyEndpoint(), () -> DestinationReader.NOT_IMPLEMENTED);
   }
 
   @Test
@@ -165,9 +158,9 @@ public class RevisionMigratorTest {
         ImmutableList.of(),
         location);
     TransformWork work = getTransformWork(desc);
-    thrown.expect(ValidationException.class);
-    thrown.expectMessage("Reference 7b does not match regex '[xyz]+'");
-    referenceMigrator.transform(work);
+    ValidationException thrown =
+        assertThrows(ValidationException.class, () -> referenceMigrator.transform(work));
+    assertThat(thrown).hasMessageThat().contains("Reference 7b does not match regex '[xyz]+'");
   }
 
   @Test

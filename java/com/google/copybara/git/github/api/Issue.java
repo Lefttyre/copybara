@@ -17,7 +17,6 @@
 package com.google.copybara.git.github.api;
 
 import com.google.api.client.util.Key;
-import com.google.common.base.MoreObjects;
 import java.util.List;
 
 /**
@@ -43,27 +42,4 @@ public class Issue extends PullRequestOrIssue {
         .toString();
   }
 
-  public static class Label {
-
-    @Key
-    private long id;
-    @Key
-    private String name;
-
-    public long getId() {
-      return id;
-    }
-
-    public String getName() {
-      return name;
-    }
-
-    @Override
-    public String toString() {
-      return MoreObjects.toStringHelper(this)
-          .add("id", id)
-          .add("name", name)
-          .toString();
-    }
-  }
 }

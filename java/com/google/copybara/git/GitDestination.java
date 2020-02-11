@@ -17,6 +17,7 @@
 package com.google.copybara.git;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.copybara.DestinationReader.NOOP_DESTINATION_READER;
 import static com.google.copybara.GeneralOptions.FORCE;
 import static com.google.copybara.LazyResourceLoader.memoized;
 import static com.google.copybara.exception.ValidationException.checkCondition;
@@ -35,11 +36,13 @@ import com.google.copybara.Change;
 import com.google.copybara.ChangeMessage;
 import com.google.copybara.Destination;
 import com.google.copybara.DestinationEffect;
+import com.google.copybara.DestinationReader;
 import com.google.copybara.DestinationStatusVisitor;
 import com.google.copybara.Endpoint;
 import com.google.copybara.GeneralOptions;
 import com.google.copybara.LabelFinder;
 import com.google.copybara.LazyResourceLoader;
+import com.google.copybara.Origin;
 import com.google.copybara.Revision;
 import com.google.copybara.TransformResult;
 import com.google.copybara.WriterContext;
@@ -519,10 +522,14 @@ public final class GitDestination implements Destination<GitRevision> {
 
       GitRevision afterRebaseRev = null;
       if (baseline != null && rebase) {
-        Path rebaseLock = alternate.getGitDir().resolve("rebase-apply");
-        if (Files.exists(rebaseLock)){
-          console.warn("Removing previous rebase failure lock: "+ rebaseLock);
-          deleteRecursively(rebaseLock);
+        ImmutableList<Path> rebaseLocks = ImmutableList.of(
+            alternate.getGitDir().resolve("rebase-apply"),
+            alternate.getGitDir().resolve("rebase-merge"));
+        for (Path rebaseLock : rebaseLocks) {
+          if (Files.exists(rebaseLock)) {
+            console.warn("Removing previous rebase failure lock: " + rebaseLock);
+            deleteRecursively(rebaseLock);
+          }
         }
         // Note that it is a different work-tree from the previous reset
         alternate.simpleCommand("reset", "--hard");
@@ -645,7 +652,7 @@ public final class GitDestination implements Destination<GitRevision> {
     /**
      * Get the local {@link GitRepository} associated with the writer.
      *
-     * Note that this is not a public interface and is subjec to change.
+     * Note that this is not a public interface and is subject to change.
      */
     public GitRepository getRepository(Console console) throws RepoException, ValidationException {
       return state.localRepo.load(console);
@@ -705,6 +712,26 @@ public final class GitDestination implements Destination<GitRevision> {
       }
       verifyUserInfoConfigured(repo);
 
+    }
+
+    @Override
+    public DestinationReader getDestinationReader(
+        Console console, Origin.Baseline<?> baseline, Path workdir)
+        throws ValidationException, RepoException {
+      GitRepository repo = getRepository(console);
+      fetchIfNeeded(repo, console);
+      GitRevision rev;
+      if (baseline != null && baseline.getBaseline() != null) {
+        rev = repo.resolveReference(baseline.getBaseline());
+      } else {
+        rev = getLocalBranchRevision(repo);
+      }
+      // In case of --force, the destination might be empty and have no revisions. Do not fail.
+      if (rev == null) {
+        console.info("Destination reader requested, but destination is empty. Using noop reader");
+        return NOOP_DESTINATION_READER;
+      }
+      return new GitDestinationReader(repo, rev, workdir);
     }
   }
 

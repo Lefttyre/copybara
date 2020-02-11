@@ -37,6 +37,7 @@ import static com.google.copybara.git.github.api.GitHubEventType.WATCHABLE_EVENT
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
+import com.google.copybara.EndpointProvider;
 import com.google.copybara.GeneralOptions;
 import com.google.copybara.Options;
 import com.google.copybara.Transformation;
@@ -74,6 +75,7 @@ import com.google.devtools.build.lib.skylarkinterface.SkylarkModuleCategory;
 import com.google.devtools.build.lib.syntax.Dict;
 import com.google.devtools.build.lib.syntax.EvalException;
 import com.google.devtools.build.lib.syntax.EvalUtils;
+import com.google.devtools.build.lib.syntax.Module;
 import com.google.devtools.build.lib.syntax.NoneType;
 import com.google.devtools.build.lib.syntax.Sequence;
 import com.google.devtools.build.lib.syntax.Starlark;
@@ -221,7 +223,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
             doc = "Select a custom version (tag)to migrate" + " instead of 'ref'",
             noneable = true),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   public GitOrigin origin(
       String url,
       Object ref,
@@ -231,7 +233,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       Object patch,
       Object describeVersion,
       Object versionSelector,
-      Location location)
+      StarlarkThread thread)
       throws EvalException {
     checkNotEmpty(url, "url");
     PatchTransformation patchTransformation = maybeGetPatchTransformation(patch);
@@ -245,7 +247,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
 
     return GitOrigin.newGitOrigin(
         options,
-        fixHttp(url, location),
+        fixHttp(url, thread.getCallerLocation()),
         SkylarkUtil.convertOptionalString(ref),
         GitRepoType.GIT,
         stringToEnum("submodules", submodules, GitOrigin.SubmoduleStrategy.class),
@@ -368,7 +370,6 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
             doc = "A description of what this workflow achieves",
             defaultValue = "None"),
       },
-      useLocation = true,
       useStarlarkThread = true)
   @UsesFlags(GitMirrorOptions.class)
   public NoneType mirror(
@@ -378,7 +379,6 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       Sequence<?> strRefSpecs, // <String>
       Boolean prune,
       Object description,
-      Location location,
       StarlarkThread thread)
       throws EvalException {
     GeneralOptions generalOptions = options.get(GeneralOptions.class);
@@ -396,15 +396,16 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
         throw Starlark.errorf("%s", e.getMessage());
       }
     }
-    GlobalMigrations.getGlobalMigrations(thread)
+    Module module = Module.ofInnermostEnclosingStarlarkFunction(thread);
+    GlobalMigrations.getGlobalMigrations(module)
         .addMigration(
             name,
             new Mirror(
                 generalOptions,
                 gitOptions,
                 name,
-                fixHttp(origin, location),
-                fixHttp(destination, location),
+                fixHttp(origin, thread.getCallerLocation()),
+                fixHttp(destination, thread.getCallerLocation()),
                 refspecs,
                 options.get(GitMirrorOptions.class),
                 prune,
@@ -516,7 +517,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
             doc = DESCRIBE_VERSION_FIELD_DOC,
             noneable = true)
       },
-      useLocation = true)
+      useStarlarkThread = true)
   public GitOrigin gerritOrigin(
       String url,
       Object ref,
@@ -526,10 +527,10 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       Object patch,
       Object branch,
       Object describeVersion,
-      Location location)
+      StarlarkThread thread)
       throws EvalException {
     checkNotEmpty(url, "url");
-    url = fixHttp(url, location);
+    url = fixHttp(url, thread.getCallerLocation());
     String refField = SkylarkUtil.convertOptionalString(ref);
 
     PatchTransformation patchTransformation = maybeGetPatchTransformation(patch);
@@ -756,7 +757,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
             doc = DESCRIBE_VERSION_FIELD_DOC,
             noneable = true)
       },
-      useLocation = true)
+      useStarlarkThread = true)
   @UsesFlags(GitHubPrOriginOptions.class)
   @DocDefault(field = "review_approvers", value = "[\"COLLABORATOR\", \"MEMBER\", \"OWNER\"]")
   public GitHubPROrigin githubPrOrigin(
@@ -774,7 +775,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       Object patch,
       Object branch,
       Object describeVersion,
-      Location location)
+      StarlarkThread thread)
       throws EvalException {
     checkNotEmpty(url, "url");
     check(url.contains("github.com"), "Invalid Github URL: %s", url);
@@ -805,7 +806,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
     }
 
     return new GitHubPROrigin(
-        fixHttp(url, location),
+        fixHttp(url, thread.getCallerLocation()),
         merge,
         options.get(GeneralOptions.class),
         options.get(GitOptions.class),
@@ -890,7 +891,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
             doc = "Select a custom version (tag)to migrate" + " instead of 'ref'",
             noneable = true),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   public GitOrigin githubOrigin(
       String url,
       Object ref,
@@ -899,7 +900,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       Object patch,
       Object describeVersion,
       Object versionSelector,
-      Location location)
+      StarlarkThread thread)
       throws EvalException {
     check(GitHubUtil.isGitHubUrl(checkNotEmpty(url, "url")), "Invalid Github URL: %s", url);
 
@@ -915,7 +916,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
     // TODO(copybara-team): See if we want to support includeBranchCommitLogs for GitHub repos.
     return GitOrigin.newGitOrigin(
         options,
-        fixHttp(url, location),
+        fixHttp(url, thread.getCallerLocation()),
         SkylarkUtil.convertOptionalString(ref),
         GitRepoType.GITHUB,
         stringToEnum("submodules", submodules, GitOrigin.SubmoduleStrategy.class),
@@ -1000,7 +1001,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
             positional = false,
             noneable = true),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   @UsesFlags(GitDestinationOptions.class)
   public GitDestination destination(
       String url,
@@ -1009,13 +1010,15 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       Object tagMsg,
       Object fetch,
       Object integrates,
-      Location location)
+      StarlarkThread thread)
       throws EvalException {
     GitDestinationOptions destinationOptions = options.get(GitDestinationOptions.class);
     String resolvedPush = checkNotEmpty(firstNotNull(destinationOptions.push, push), "push");
     GeneralOptions generalOptions = options.get(GeneralOptions.class);
     return new GitDestination(
-        fixHttp(checkNotEmpty(firstNotNull(destinationOptions.url, url), "url"), location),
+        fixHttp(
+            checkNotEmpty(firstNotNull(destinationOptions.url, url), "url"),
+            thread.getCallerLocation()),
         checkNotEmpty(
             firstNotNull(destinationOptions.fetch, convertFromNoneable(fetch, null), resolvedPush),
             "fetch"),
@@ -1111,7 +1114,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
             positional = false,
             noneable = true),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   @UsesFlags(GitDestinationOptions.class)
   // Used to detect in the future users that don't set it and change the default
   @DocDefault(field = "delete_pr_branch", value = "False")
@@ -1123,13 +1126,15 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       Object deletePrBranchParam,
       Object integrates,
       Object checker,
-      Location location)
+      StarlarkThread thread)
       throws EvalException {
     GitDestinationOptions destinationOptions = options.get(GitDestinationOptions.class);
     String resolvedPush = checkNotEmpty(firstNotNull(destinationOptions.push, push), "push");
     GeneralOptions generalOptions = options.get(GeneralOptions.class);
     String repoUrl =
-        fixHttp(checkNotEmpty(firstNotNull(destinationOptions.url, url), "url"), location);
+        fixHttp(
+            checkNotEmpty(firstNotNull(destinationOptions.url, url), "url"),
+            thread.getCallerLocation());
     String branchToUpdate = convertFromNoneable(prBranchToUpdate, null);
     Boolean deletePrBranch = convertFromNoneable(deletePrBranchParam, null);
     check(
@@ -1261,7 +1266,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
                     + " the PR. If this field is set to true, it will update those fields for"
                     + " every update."),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   @UsesFlags({GitDestinationOptions.class, GitHubDestinationOptions.class})
   @Example(
       title = "Common usage",
@@ -1298,7 +1303,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       Object integrates,
       Object checkerObj,
       Boolean updateDescription,
-      Location location)
+      StarlarkThread thread)
       throws EvalException {
     GeneralOptions generalOptions = options.get(GeneralOptions.class);
     // This restricts to github.com, we will have to revisit this to support setups like GitHub
@@ -1306,7 +1311,9 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
     check(GitHubUtil.isGitHubUrl(url), "'%s' is not a valid GitHub url", url);
     GitDestinationOptions destinationOptions = options.get(GitDestinationOptions.class);
     return new GitHubPrDestination(
-        fixHttp(checkNotEmpty(firstNotNull(destinationOptions.url, url), "url"), location),
+        fixHttp(
+            checkNotEmpty(firstNotNull(destinationOptions.url, url), "url"),
+            thread.getCallerLocation()),
         destinationRef,
         convertFromNoneable(prBranch, null),
         generalOptions,
@@ -1469,7 +1476,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
                     + "By default it sets no topic. This field accepts a template with labels. "
                     + "For example: `\"topic_${CONTEXT_REFERENCE}\"`"),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   @UsesFlags(GitDestinationOptions.class)
   @DocDefault(field = "push_to_refs_for", value = "fetch value")
   public GerritDestination gerritDestination(
@@ -1486,7 +1493,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       Object checkerObj,
       Object integrates,
       Object topicObj,
-      Location location)
+      StarlarkThread thread)
       throws EvalException {
     checkNotEmpty(url, "url");
 
@@ -1509,7 +1516,7 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
             : stringToEnum("notify", notifyOptionStr, NotifyOption.class);
     return GerritDestination.newGerritDestination(
         options,
-        fixHttp(url, location),
+        fixHttp(url, thread.getCallerLocation()),
         checkNotEmpty(firstNotNull(options.get(GitDestinationOptions.class).fetch, fetch), "fetch"),
         checkNotEmpty(
             firstNotNull(
@@ -1552,17 +1559,19 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
             named = true,
             noneable = true),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   @UsesFlags(GitHubOptions.class)
-  public GitHubEndPoint githubApi(String url, Object checkerObj, Location location)
+  public EndpointProvider<GitHubEndPoint>
+  githubApi(String url, Object checkerObj, StarlarkThread thread)
       throws EvalException {
     checkNotEmpty(url, "url");
-    url = fixHttp(url, location);
+    String cleanedUrl = fixHttp(url, thread.getCallerLocation());
     Checker checker = convertFromNoneable(checkerObj, null);
     validateEndpointChecker(checker, GITHUB_API);
     GitHubOptions gitHubOptions = options.get(GitHubOptions.class);
-    return new GitHubEndPoint(gitHubOptions.newGitHubApiSupplier(url, checker), url,
-        getGeneralConsole());
+    return EndpointProvider.wrap(
+        new GitHubEndPoint(gitHubOptions.newGitHubApiSupplier(cleanedUrl, checker), cleanedUrl,
+            getGeneralConsole()));
   }
 
   @SuppressWarnings("unused")
@@ -1586,17 +1595,18 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
             named = true,
             noneable = true),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   @UsesFlags(GerritOptions.class)
-  public GerritEndpoint gerritApi(String url, Object checkerObj, Location location)
-      throws EvalException {
+  public EndpointProvider<GerritEndpoint> gerritApi(
+      String url, Object checkerObj, StarlarkThread thread) throws EvalException {
     checkNotEmpty(url, "url");
-    url = fixHttp(url, location);
+    String cleanedUrl = fixHttp(url, thread.getCallerLocation());
     Checker checker = convertFromNoneable(checkerObj, null);
     validateEndpointChecker(checker, GERRIT_API);
     GerritOptions gerritOptions = options.get(GerritOptions.class);
-    return new GerritEndpoint(gerritOptions.newGerritApiSupplier(url, checker), url,
-        getGeneralConsole());
+    return EndpointProvider.wrap(
+        new GerritEndpoint(gerritOptions.newGerritApiSupplier(cleanedUrl, checker),
+            cleanedUrl, getGeneralConsole()));
   }
 
   private Console getGeneralConsole() {
@@ -1608,18 +1618,25 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       name = GERRIT_TRIGGER,
       doc = "Defines a feedback trigger based on updates on a Gerrit change.",
       parameters = {
-          @Param(name = "url", type = String.class, doc = "Indicates the Gerrit repo URL.",
-              named = true),
-          @Param(name = "checker", type = Checker.class,  defaultValue = "None",
-              doc = "A checker for the Gerrit API transport provided by this trigger.",
-              named = true, noneable = true),
+        @Param(
+            name = "url",
+            type = String.class,
+            doc = "Indicates the Gerrit repo URL.",
+            named = true),
+        @Param(
+            name = "checker",
+            type = Checker.class,
+            defaultValue = "None",
+            doc = "A checker for the Gerrit API transport provided by this trigger.",
+            named = true,
+            noneable = true),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   @UsesFlags(GerritOptions.class)
-  public GerritTrigger gerritTrigger(String url, Object checkerObj, Location location)
+  public GerritTrigger gerritTrigger(String url, Object checkerObj, StarlarkThread thread)
       throws EvalException {
     checkNotEmpty(url, "url");
-    url = fixHttp(url, location);
+    url = fixHttp(url, thread.getCallerLocation());
     Checker checker = convertFromNoneable(checkerObj, null);
     validateEndpointChecker(checker, GERRIT_TRIGGER);
     GerritOptions gerritOptions = options.get(GerritOptions.class);
@@ -1655,16 +1672,16 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
                     + " `'PULL_REQUEST'`,  `'PULL_REQUEST_REVIEW_COMMENT'`, `'PUSH'`,"
                     + " `'STATUS'`, "),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   @UsesFlags(GitHubOptions.class)
   public GitHubTrigger gitHubTrigger(
       String url,
       Object checkerObj,
       Sequence<?> events, // <String>
-      Location location)
+      StarlarkThread thread)
       throws EvalException {
     checkNotEmpty(url, "url");
-    url = fixHttp(url, location);
+    url = fixHttp(url, thread.getCallerLocation());
     Checker checker = convertFromNoneable(checkerObj, null);
     LinkedHashSet<GitHubEventType> eventBuilder = new LinkedHashSet<>();
     for (String e : events.getContents(String.class, "events")) {
@@ -1744,11 +1761,11 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
                     + " Example {\"n0\": \"[0-9]+\", \"s1\": \"[a-z]+\"}",
             defaultValue = "{'n0' : '[0-9]+', 'n1' : '[0-9]+', 'n2' : '[0-9]+'}"),
       },
-      useLocation = true)
+      useStarlarkThread = true)
   public LatestVersionSelector versionSelector(
       String refspec,
       Dict<?, ?> groups, // <String, String>
-      Location location)
+      StarlarkThread thread)
       throws EvalException {
     Map<String, String> groupsMap =
         groups.getContents(String.class, String.class, "refspec_groups");
@@ -1788,7 +1805,8 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       }
     }
 
-    return new LatestVersionSelector(refspec, Replace.parsePatterns(groupsMap), elements, location);
+    return new LatestVersionSelector(
+        refspec, Replace.parsePatterns(groupsMap), elements, thread.getCallerLocation());
   }
 
   @Override
@@ -1802,9 +1820,10 @@ public class GitModule implements LabelsAwareModule, StarlarkValue {
       RepositoryUtil.validateNotHttp(url);
     } catch (ValidationException e) {
       String fixed = "https" + url.substring("http".length());
-      getGeneralConsole().warnFmt(
-          "%s: Url '%s' does not use https - please change the URL. Proceeding with '%s'.",
-          location.print(), url, fixed);
+      getGeneralConsole()
+          .warnFmt(
+              "%s: Url '%s' does not use https - please change the URL. Proceeding with '%s'.",
+              location, url, fixed);
       return fixed;
     }
     return url;

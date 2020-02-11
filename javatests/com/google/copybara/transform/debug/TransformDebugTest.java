@@ -18,11 +18,11 @@ package com.google.copybara.transform.debug;
 
 import static com.google.common.truth.Truth.assertThat;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static junit.framework.TestCase.fail;
+import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Matchers.eq;
-import static org.mockito.Matchers.matches;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.matches;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -121,12 +121,8 @@ public class TransformDebugTest {
   public void testStop() throws Exception {
     options.debug.debugFileBreak = "test1.txt";
     mockAnswer("Replace foo1", "s");
-    try {
-      runWorkflow();
-      fail();
-    } catch (ValidationException e) {
-      assertThat(e).hasMessageThat().contains("Stopped by user");
-    }
+    ValidationException e = assertThrows(ValidationException.class, () -> runWorkflow());
+    assertThat(e).hasMessageThat().contains("Stopped by user");
   }
 
   private void mockAnswer(String description,

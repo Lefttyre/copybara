@@ -31,6 +31,7 @@ import com.google.copybara.DestinationEffect.Type;
 import com.google.copybara.Origin.Baseline;
 import com.google.copybara.Origin.Reader;
 import com.google.copybara.Origin.Reader.ChangesResponse;
+import com.google.copybara.TransformWork.ResourceSupplier;
 import com.google.copybara.authoring.Author;
 import com.google.copybara.authoring.Authoring;
 import com.google.copybara.exception.CannotResolveRevisionException;
@@ -60,15 +61,12 @@ import java.nio.file.PathMatcher;
 import java.nio.file.Paths;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 import javax.annotation.Nullable;
 
 /**
  * Runs a single migration step for a {@link Workflow}, using its configuration.
  */
 public class WorkflowRunHelper<O extends Revision, D extends Revision> {
-
-  private static final Logger logger = Logger.getLogger(WorkflowRunHelper.class.getName());
 
   private final Workflow<O, D> workflow;
   private final Path workdir;
@@ -518,6 +516,11 @@ public class WorkflowRunHelper<O extends Revision, D extends Revision> {
           }
         }
       }
+      // Lazy loading to avoid running afoul of checks unless the instance is actually used.
+      LazyResourceLoader<Endpoint> originApi = c -> reader.getFeedbackEndPoint(c);
+      LazyResourceLoader<Endpoint> destinationApi = c-> writer.getFeedbackEndPoint(c);
+      ResourceSupplier<DestinationReader> destinationReader = () ->
+          writer.getDestinationReader(workflow.getConsole(), destinationBaseline, workdir);
 
       TransformWork transformWork =
           new TransformWork(
@@ -527,7 +530,10 @@ public class WorkflowRunHelper<O extends Revision, D extends Revision> {
               workflow.getConsole(),
               new MigrationInfo(workflow.getRevIdLabel(), writer),
               resolvedRef,
-              /*ignoreNoop=*/ false)
+              /*ignoreNoop=*/ false,
+              originApi,
+              destinationApi,
+              destinationReader)
               .withLastRev(lastRev)
               .withCurrentRev(rev);
       try (ProfilerTask ignored = profiler().start("transforms")) {
@@ -561,7 +567,10 @@ public class WorkflowRunHelper<O extends Revision, D extends Revision> {
                       workflow.getConsole(),
                       new MigrationInfo(/*originLabel=*/ null, null),
                       resolvedRef,
-                      /*ignoreNoop=*/ false));
+                      /*ignoreNoop=*/ false,
+                      destinationApi,
+                      originApi,
+                      () -> DestinationReader.NOT_IMPLEMENTED));
         }
         String diff;
         try {
@@ -628,7 +637,10 @@ public class WorkflowRunHelper<O extends Revision, D extends Revision> {
                   resolvedRef,
                   // Doesn't guarantee that we will not run a ignore_noop = False core.transform but
                   // reduces the chances.
-                  /*ignoreNoop=*/true)
+                  /*ignoreNoop=*/true,
+                  originApi,
+                  destinationApi,
+                  destinationReader)
                   // Again, we don't care about this
                   .withLastRev(lastRev)
                   .withCurrentRev(destinationBaseline.getOriginRevision());
